@@ -79,5 +79,5 @@ Swagger предсталвен по адресу:
 	Мягкое удаление пользователей
 ```
 Скриншоты
-<img width="1626" height="713" alt="image" src="https://github.com/user-attachments/assets/24b86109-d1ff-41a8-8936-736627cd9ec1" />
-<img width="1600" height="779" alt="image" src="https://github.com/user-attachments/assets/4fbe0ee0-0fc5-45c0-b87a-e4b0081df7a5" />
+<img width="1437" height="864" alt="image" src="https://github.com/user-attachments/assets/366c02bd-4d7b-4b1b-a524-0a049f67cf1d" />
+<img width="1434" height="721" alt="image" src="https://github.com/user-attachments/assets/1aabcc37-1dbe-4ac2-8813-3c25a7ece21c" />
