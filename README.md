@@ -15,7 +15,7 @@ docker compose up
 Перед запуском убедитесь, что:
 	установлен Docker
 	установлен Docker Compose
-	настроены переменные окружения (если используются .env)
+	настроены переменные окружения (если используются .env.docker)
 
 Swagger предсталвен по адресу:
 	127.0.0.1:8000/docs
@@ -78,6 +78,3 @@ Swagger предсталвен по адресу:
 	Разделение ролей и прав
 	Мягкое удаление пользователей
 ```
-Скриншоты
-<img width="1626" height="713" alt="image" src="https://github.com/user-attachments/assets/24b86109-d1ff-41a8-8936-736627cd9ec1" />
-<img width="1600" height="779" alt="image" src="https://github.com/user-attachments/assets/4fbe0ee0-0fc5-45c0-b87a-e4b0081df7a5" />

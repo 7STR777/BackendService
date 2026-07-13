@@ -1,6 +1,6 @@
 from app.db.config import settings
 from app.db.database import AsyncORM
-from app.services.schemas import User
+from app.services.schemas import UserResponse
 
 from fastapi.security import OAuth2PasswordBearer
 from fastapi.exceptions import HTTPException
@@ -77,7 +77,7 @@ async def get_current_user(email: str, password:str):
 def admin_required(func):
     """Декоратор для проверки прав администратора"""
     @wraps(func)
-    async def wrapper(*args, current_user: Annotated[User, Depends(get_current_user_from_token)], **kwargs):
+    async def wrapper(*args, current_user: Annotated[UserResponse, Depends(get_current_user_from_token)], **kwargs):
         if not current_user:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,

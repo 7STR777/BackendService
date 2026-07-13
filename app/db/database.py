@@ -1,9 +1,13 @@
-from app.db.models import Users, Roles, AccessRolesRules, BusinessElements, Products
+from app.db.models import Users, Roles, AccessRolesRules, BusinessElements, Products, Orders, OrderItem
 from sqlalchemy import select, insert, update, delete
+from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from app.db.config import settings
 from app.db.base import Base
 from app.services.encrypting import encrypt_password
+from app.services.schemas import OrderStatus
+from datetime import datetime
+
 
 async_engine = create_async_engine(settings.DATABASE_URL_asyncpg, echo=False)
 
@@ -11,7 +15,7 @@ async_session = async_sessionmaker(async_engine)
 
 class ProductData():
     @staticmethod
-    async def show_all_products():
+    async def get_all_products():
         """
         Показывает все продукты
         """
@@ -22,7 +26,31 @@ class ProductData():
             return products
     
     @staticmethod
-    async def show_product(product_id: int):
+    async def get_product_price(product_id: int):
+        """
+        Показывает имя продукта
+        """
+        async with async_session() as session:
+            stmt = select(Products.price).where(Products.product_id==product_id)
+            result = await session.execute(stmt)
+            product_price = result.scalar_one()
+            return product_price
+        
+
+    @staticmethod
+    async def get_product_name(product_id: int):
+        """
+        Показывает имя продукта
+        """
+        async with async_session() as session:
+            stmt = select(Products.product_name).where(Products.product_id==product_id)
+            result = await session.execute(stmt)
+            product_name = result.scalar_one()
+            return product_name
+        
+
+    @staticmethod
+    async def get_product(product_id: int):
         """
         Показывает данные продукта
         """
@@ -47,12 +75,20 @@ class ProductData():
     @staticmethod
     async def update_fields_of_product(product_id: int, update_data: dict):
         async with async_session() as session:
-            stmt = update(Products).where(Products.product_id==product_id).values(
-                **update_data
+            stmt = (
+                update(Products)
+                .where(Products.product_id == product_id)
+                .values(**update_data)
+                .returning(Products) 
             )
-            await session.execute(stmt)
-            await session.commit()
-            print('[LOGS]: Fields of product updated!')
+            db_result = await session.execute(stmt)
+            updated_product = db_result.scalar()
+            if updated_product:
+                await session.commit()
+                print('[LOGS]: Fields of product updated!')
+                return updated_product
+            return None
+             
 
     @staticmethod
     async def update_product(product_id: int, product_name: str, amount: int, price: int):
@@ -74,10 +110,111 @@ class ProductData():
             await session.commit()
             print('[LOGS]: Product deleted!')
 
+class OrderData():
+    @staticmethod
+    async def create_order(user_id: int, shipping_address: str,  items_data: list):
+        """Создает заказ"""
+        async with async_session() as session:
+            total_price = 0
+            order_items = []
 
+            for item in items_data:
+                stmt = select(Products).where(Products.product_id==item["product_id"])
+                result = await session.execute(stmt)
+                product = result.scalar_one_or_none()
+
+                if not product:
+                    raise ValueError(f"Товар с id={item['product_id']} не найден.")
+
+                if product.amount < item["quantity"]:
+                    raise ValueError(f"Товара с id={item['product_id']} не достаточно на складе")
+
+                item_total = product.price * item['quantity']
+                total_price += item_total
+
+                order_items.append({
+                    "product_id":product.product_id,
+                    "product_name":product.product_name,
+                    "quantity":item["quantity"],
+                    "price_at_time": product.price
+                })
+
+            new_order = Orders(
+                user_id=user_id,
+                created_at=datetime.now(),
+                status=OrderStatus.PENDING,
+                total_price=total_price,
+                shipping_address=shipping_address
+            )
+
+            session.add(new_order)
+            await session.flush()
+
+            for item in order_items:
+                order_item = OrderItem(
+                    order_id=new_order.order_id,
+                    product_id=item["product_id"],
+                    product_name=item["product_name"],
+                    quantity=item["quantity"],
+                    price_at_time=item["price_at_time"]
+                )
+                session.add(order_item)
+            
+            await session.commit()
+            await session.refresh(new_order)
+            return new_order
+        
+    @staticmethod
+    async def get_orders_by_user_id(user_id: int):
+        async with async_session() as session:
+            stmt = select(Orders).where(Orders.user_id==user_id).order_by(Orders.order_id.desc())
+            result = await session.execute(stmt)
+            orders = result.scalars().all()
+            return orders
+        
+    @staticmethod
+    async def get_order_details(order_id: int):
+        async with async_session() as session:
+            stmt = select(OrderItem).where(OrderItem.order_id==order_id)
+            result = await session.execute(stmt)
+            order_detail = result.scalar_one_or_none()
+            return order_detail
+
+    @staticmethod
+    async def check_ownership_of_order(user_id: int, order_id: int) -> bool:
+        """
+        Проверяет, принадлежит ли заказ пользователю.
+        Возвращает True, если заказ принадлежит пользователю.
+        """
+        async with async_session() as session:
+            stmt = select(Orders).where(
+                Orders.order_id == order_id,
+                Orders.user_id == user_id
+            )
+            result = await session.execute(stmt)
+            order = result.scalar_one_or_none()
+            return order is not None
+        
+    @staticmethod
+    async def get_order_by_id(order_id: int):
+        """
+        Получает заказ по ID с предварительно загруженными позициями.
+        """
+        from sqlalchemy.orm import selectinload
+        
+        async with async_session() as session:
+            stmt = (
+                select(Orders)
+                .where(Orders.order_id == order_id)
+                .options(selectinload(Orders.items))
+            )
+            result = await session.execute(stmt)
+            order = result.scalar_one_or_none()
+            return order
+            
 class StaticData():
     @staticmethod
-    async def add_test_roles():
+    async def add_roles():
         """
         Добавляет роли в БД
         """
@@ -94,7 +231,7 @@ class StaticData():
             await session.commit()
 
     @staticmethod
-    async def add_test_users():
+    async def add_users():
         """Добавляет тестовых пользователей с разными ролями"""
         async with async_session() as session:
 
@@ -134,6 +271,14 @@ class StaticData():
                     "role_id": roles["guest"],
                     "is_active": True
                 },
+                {
+                    "surname": "Sidorov",
+                    "name": "Michael",
+                    "email": "user2@mail.com",
+                    "password": encrypt_password("user2"),
+                    "role_id": roles["user"],
+                    "is_active": True
+                },
             ]
 
             stmt = insert(Users).values(data)
@@ -141,7 +286,7 @@ class StaticData():
             await session.commit()
 
     @staticmethod
-    async def add_test_products():
+    async def add_products():
         """Добавляет тестовые продукты"""
         async with async_session() as session:
 
@@ -173,15 +318,77 @@ class StaticData():
             await session.commit()
 
     @staticmethod
+    async def add_orders():
+        """Добавляет заказы"""
+        async with async_session() as session:
+            data = insert(Orders).values([
+                {
+                    "user_id":1,
+                    "created_at":datetime.now(),
+                    "status":"pending",
+                    "total_price":15996,
+                    "shipping_address":"г. Москва, ул. Первомайская, 8"
+                },
+                {
+                    "user_id":1,
+                    "created_at":datetime.now(),
+                    "status":"paid",
+                    "total_price":4998,
+                    "shipping_address":"г. Санкт-Петербург, ул. Ленина, 12"
+                },
+                                {
+                    "user_id":5,
+                    "created_at":datetime.now(),
+                    "status":"paid",
+                    "total_price":3996,
+                    "shipping_address":"г. Киров, ул. Строителей, 41"
+                }
+            ])
+
+            await session.execute(data)
+            await session.commit()
+
+    @staticmethod
+    async def add_order_items():
+        """Добавляет детали заказов"""
+        async with async_session() as session:
+            data = insert(OrderItem).values([
+                {
+                    "order_id":1,
+                    "product_id":1,
+                    "product_name":"Футболка",
+                    "quantity":4,
+                    "price_at_time":3999
+                },
+                {
+                    "order_id":2,
+                    "product_id":2,
+                    "product_name":"Штаны",
+                    "quantity":2,
+                    "price_at_time":2499
+                },                {
+                    "order_id":3,
+                    "product_id":4,
+                    "product_name":"Кепка",
+                    "quantity":4,
+                    "price_at_time":999
+                }
+            ])
+
+            await session.execute(data)
+            await session.commit()
+
+    @staticmethod
     async def add_business_elements():
         """
         Добавляет бизнес-сущности
         """
         async with async_session() as session:
-            stmt = insert(BusinessElements).values([
-                {"business_element": "products"}
+            data = insert(BusinessElements).values([
+                {"business_element": "products"},
+                {"business_element":"orders"}
             ])
-            await session.execute(stmt)
+            await session.execute(data)
             await session.commit()
 
     @staticmethod
@@ -200,7 +407,7 @@ class StaticData():
             if not product_element:
                 raise Exception("Business element 'products' not found")
 
-            data = [
+            data_products = [
                 {
                     "role_id": roles["admin"],
                     "business_element_id": product_element.business_element_id,
@@ -217,7 +424,7 @@ class StaticData():
                     "role_id": roles["user"],
                     "business_element_id": product_element.business_element_id,
                     "read_permission": True,
-                    "read_all_permission": True,
+                    "read_all_permission": False,
                     "create_permission": False,
                     "update_permission": False,
                     "update_all_permission": False,
@@ -250,49 +457,70 @@ class StaticData():
                 },
             ]
 
-            stmt = insert(AccessRolesRules).values(data)
-            await session.execute(stmt)
-            await session.commit()
+            elements = await session.execute(
+                select(BusinessElements).where(BusinessElements.business_element == "orders")
+            )
+            product_element = elements.scalar_one_or_none()
 
-    @staticmethod
-    async def add_test_business_element():
-        async with async_session() as session:
-            stmt = insert(BusinessElements).values(
+            if not product_element:
+                raise Exception("Business element 'orders' not found")
+            
+            data_orders = [
                 {
-                    "business_element":"orders"
-                }
-            )
+                    "role_id": roles["admin"],
+                    "business_element_id": product_element.business_element_id,
+                    "read_permission": True,
+                    "read_all_permission": True,
+                    "create_permission": True,
+                    "update_permission": True,
+                    "update_all_permission": True,
+                    "delete_permission": True,
+                    "delete_all_permission": True,
+                },
+
+                {
+                    "role_id": roles["user"],
+                    "business_element_id": product_element.business_element_id,
+                    "read_permission": True,
+                    "read_all_permission": False,
+                    "create_permission": True,
+                    "update_permission": False,
+                    "update_all_permission": False,
+                    "delete_permission": False,
+                    "delete_all_permission": False,
+                },
+
+                {
+                    "role_id": roles["manager"],
+                    "business_element_id": product_element.business_element_id,
+                    "read_permission": True,
+                    "read_all_permission": True,
+                    "create_permission": True,
+                    "update_permission": True,
+                    "update_all_permission": True,
+                    "delete_permission": False,
+                    "delete_all_permission": False,
+                },
+
+                {
+                    "role_id": roles["guest"],
+                    "business_element_id": product_element.business_element_id,
+                    "read_permission": True,
+                    "read_all_permission": False,
+                    "create_permission": False,
+                    "update_permission": False,
+                    "update_all_permission": False,
+                    "delete_permission": False,
+                    "delete_all_permission": False,
+                },
+            ]
+
+            all_data = data_products + data_orders
+
+            stmt = insert(AccessRolesRules).values(all_data)
             await session.execute(stmt)
             await session.commit()
-
-    @staticmethod
-    async def add_test_access_levels():
-        async with async_session() as session:
-            select_role = select(Roles.role_id).where(Roles.role_name=='user')
-            result = await session.execute(select_role)
-            role_id = result.scalar_one_or_none()
-
-            select_business_element = select(BusinessElements.business_element_id).where(BusinessElements.business_element=='orders')
-            result = await session.execute(select_business_element)
-            business_element_id = result.scalar_one_or_none()
-
-            stmt = insert(AccessRolesRules).values(
-                [
-                    {
-                        "role_id":role_id,
-                        "business_element_id": business_element_id,
-                        "read_permission":True,
-                        "read_all_permission":True,
-                        "create_permission":False,
-                        "update_permission":False,
-                        "update_all_permission":False,
-                        "delete_permission":False,
-                        "delete_all_permission":False
-                    }
-                ]
-            )
-            await session.execute(stmt)
-            await session.commit()
+            print(f"[LOGS]: Добавлено {len(all_data)} правил доступа")
 
 class AsyncORM():
     @staticmethod
@@ -305,7 +533,7 @@ class AsyncORM():
             await conn.run_sync(Base.metadata.create_all)
 
     @staticmethod
-    async def register_user(surname: str, name: str, password:str, email: str, role_id: int, is_active: bool = True):
+    async def register_user(surname: str, name: str, password:str, email: str, is_active: bool = True):
         """
         Регистрирует пользователя в базе данных.
         """
@@ -444,3 +672,16 @@ class AdminPanel():
             await session.execute(stmt)
             await session.commit()
 
+    @staticmethod
+    async def get_all_orders(skip: int = 0, limit: int = 100):
+        async with async_session() as session:
+            stmt = (
+                select(Orders)
+                .options(selectinload(Orders.items))
+                .offset(skip)
+                .limit(limit)
+                .order_by(Orders.created_at.desc())
+            )
+            result = await session.execute(stmt)
+            orders = result.scalars().all()
+            return orders

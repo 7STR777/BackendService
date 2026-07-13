@@ -3,12 +3,12 @@ version: '3.9'
 services:
   db:
     image: postgres:15
-    container_name: testproject
+    container_name: db_postgres
     restart: always
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: mysecretpass
-      POSTGRES_DB: testproject
+      POSTGRES_DB: db_postgres
     ports:
       - "5432:5432"
     volumes:
@@ -28,7 +28,10 @@ services:
       db:
         condition: service_healthy
     env_file:
-      - .env
+      - .env.docker
+    volumes:
+      - .:/app
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000
 
 volumes:
   postgres_data:

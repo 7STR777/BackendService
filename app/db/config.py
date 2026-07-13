@@ -9,6 +9,7 @@ class Settings(BaseSettings):
     DB_PORT: int = 5432
     DB_NAME: str = ""
     DB_PASS: str = ""
+    BASE_URL: str = ""
 
     @property
     def DATABASE_URL_asyncpg(self):
@@ -27,3 +28,5 @@ settings = Settings()
 # DB_PORT=5432
 # DB_PASS=ПАРОЛЬ
 # DB_USER=postgres
+
+# BASE_URL = "127.0.0.1:8000"

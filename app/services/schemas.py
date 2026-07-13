@@ -1,9 +1,11 @@
 from pydantic import BaseModel, EmailStr, Field
 from typing import Optional
+from enum import Enum
+from typing import List
+from datetime import datetime
 
 
-class User(BaseModel):
-    user_id: int
+class UserCreate(BaseModel):
     surname: str
     name: str
     email: str
@@ -12,10 +14,48 @@ class User(BaseModel):
     role_id: int = 1
     is_active: bool = True
 
+class UserResponse(BaseModel):
+    user_id: int
+    surname: str
+    name: str
+    email: str
+    password: str
+    role_id: int
+    is_active: bool
+
+class UserForChangePassword(BaseModel):
+    user_id: int
+    surname: str
+    name: str
+    email: str
+    role_id: int
+    is_active: bool
+
+class RegistrationDataResponse(BaseModel):
+    surname: str
+    name: str
+    email: str
+    password: str
+    role_id: int = 1
+    is_active: bool = True
+
+class RegistrationResponse(BaseModel):
+    status: str
+    message: str
+    data: List[RegistrationDataResponse] = Field(min_length=1)
+
 class UserLogin(BaseModel):
     email: str
     password: str
     
+class UserProfileResponse(BaseModel):
+    surname: str
+    name: str
+    email: str
+    is_active: bool
+    user_id: int
+    role_id: int
+
 class ChangePassword(BaseModel):
     password: str
     new_password: str
@@ -36,15 +76,50 @@ class CreateProduct(BaseModel):
     price: int
     amount: int
 
+class ProductResponse(BaseModel):
+    message: str
+    items: List[CreateProduct] = Field(min_length=1)
+
+class OrderStatus(str, Enum):
+    PENDING = 'pending'
+    PAID = 'paid'
+    CANCELLED = 'cancelled'
+
+class OrderItemCreate(BaseModel):
+    product_id: int = Field(gt=0)
+    quantity: int = Field(ge=1, le=999)
+
+class OrderCreate(BaseModel):
+    shipping_address: str = Field(min_length=5, max_length=500)
+    items: List[OrderItemCreate] = Field(min_length=1)
+
+class OrderItemResponse(BaseModel):
+    product_id: int
+    product_name: str
+    quantity: int
+    price_at_time: int
+
+class OrderResponse(BaseModel):
+    order_id: int
+    created_at: datetime
+    status: str
+    total_price: int
+    shipping_address: str
+    items: List[OrderItemResponse]
+
 class UpdateFieldsOfProduct(BaseModel):
-    new_product_name: Optional[str] = None
-    new_price: Optional[int] = None
-    new_amount: Optional[int] = None
+    product_name: Optional[str] = None
+    price: Optional[int] = None
+    amount: Optional[int] = None
 
 class UpdateProduct(BaseModel):
-    new_product_name: str
-    new_amount: int
-    new_price: int
+    product_name: str
+    amount: int
+    price: int
+
+class UpdateProductResponse(BaseModel):
+    message: str
+    items: List[UpdateProduct] = Field(min_length=1)
 
 class UpdateFieldOfPermission(BaseModel):
     role_id: Optional[int]
@@ -56,3 +131,7 @@ class UpdateFieldOfPermission(BaseModel):
     update_all_permission: Optional[bool] = None
     delete_permission: Optional[bool] = None
     delete_all_permission: Optional[bool] = None
+
+class UpdateFieldOfPermissionResponse(BaseModel):
+    message: str
+    permissions: List[UpdateFieldOfPermission] = Field(min_length=1)
