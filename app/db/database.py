@@ -7,7 +7,7 @@ from app.db.base import Base
 from app.services.encrypting import encrypt_password
 from app.services.schemas import OrderStatus
 from datetime import datetime
-
+import redis.asyncio as redis
 
 async_engine = create_async_engine(settings.DATABASE_URL_asyncpg, echo=False)
 
@@ -22,9 +22,10 @@ class ProductData():
         async with async_session() as session:
             stmt = select(Products)
             result = await session.execute(stmt)
-            products = result.scalars().all()
-            return products
-    
+            products_list = result.scalars().all()
+            return products_list
+
+
     @staticmethod
     async def get_product_price(product_id: int):
         """
@@ -54,11 +55,41 @@ class ProductData():
         """
         Показывает данные продукта
         """
-        async with async_session() as session:
-            stmt = select(Products).where(Products.product_id==product_id)
-            result = await session.execute(stmt)
-            product = result.scalar_one_or_none()
-            return product
+        r = None
+        try:
+            r = redis.Redis(
+                host='localhost',
+                port=6379,
+                decode_responses=True,
+                db=0
+            )
+
+            cache_key = f"product:{product_id}"
+            cached_product = await r.hgetall(cache_key)
+
+            if cached_product:
+                return Products(**cached_product)
+
+            async with async_session() as session:
+                stmt = select(Products).where(Products.product_id==product_id)
+                result = await session.execute(stmt)
+                product = result.scalar_one_or_none()
+                if product:
+                    product_dict = {
+                        "product_id":str(product.product_id),
+                        "product_name":str(product.product_name),
+                        "price":str(product.price),
+                        "amount":str(product.amount)
+                    }
+
+                    await r.hset(cache_key, mapping=product_dict)
+                    await r.expire(cache_key, 3600)
+                    return product
+        except Exception as e:
+            print(f"Ошибка {e}")
+        finally:
+            if r:
+                await r.close()
         
     @staticmethod
     async def create_product(product_name: str, price: int, amount: int):
@@ -74,41 +105,143 @@ class ProductData():
 
     @staticmethod
     async def update_fields_of_product(product_id: int, update_data: dict):
-        async with async_session() as session:
-            stmt = (
-                update(Products)
-                .where(Products.product_id == product_id)
-                .values(**update_data)
-                .returning(Products) 
-            )
-            db_result = await session.execute(stmt)
-            updated_product = db_result.scalar()
-            if updated_product:
-                await session.commit()
-                print('[LOGS]: Fields of product updated!')
-                return updated_product
-            return None
+        r = None
+        try:
+            r = redis.Redis(host='localhost',port=6379, decode_responses=True)
+            has_changes = False
+            cache_key = f"product:{product_id}"
+            cached_product = await r.hgetall(cache_key)
+            if cached_product: # {product_name:value, price: value, amount: value}
+                for key, value in update_data.items():
+                    if key in cached_product:
+                        cached_value = cached_product[key]
+                        try:
+                            if value is not None:
+                                target_type = type(value)
+                                cached_value = target_type(cached_value)
+                        except (ValueError, TypeError):
+                            pass
+                        
+                        if cached_value != value:
+                            has_changes = True
+                            break
+            else:
+                has_changes = True
+
+            if not has_changes:
+                return True
+            
+            async with async_session() as session:
+                stmt = select(Products).where(Products.product_id == product_id)
+                db_result = await session.execute(stmt)
+                product = db_result.scalar_one_or_none()
+
+                if product:
+                    for key, value in update_data.items():
+                        if hasattr(product, key):
+                            setattr(product, key, value)
+                    await session.commit()
+                    await session.refresh(product) 
+                    print('[LOGS]: Fields of product updated!')
+
+                    updated_product_dict = {
+                        "product_name":str(product.product_name),
+                        "price":str(product.price),
+                        "amount":str(product.amount)
+                    }
+
+                    await r.hset(cache_key, mapping=updated_product_dict)
+                    await r.expire(cache_key, 3600)
+                    return product
+                return None
+        except Exception as e:
+            print(f"Произошла ошибка {e}")
+        finally:
+            if r:
+                await r.close()
              
 
     @staticmethod
     async def update_product(product_id: int, product_name: str, amount: int, price: int):
-        async with async_session() as session:
-            stmt = update(Products).where(Products.product_id==product_id).values(
-                product_name=product_name,
-                amount=amount,
-                price=price
-            )
-            await session.execute(stmt)
-            await session.commit()
-            print('[LOGS]: Product updated!')
+        r = None
+        update_data = {
+            "product_name":product_name,
+            "amount":amount,
+            "price":price
+        }
+        try:
+            r = redis.Redis(host='localhost',port=6379, decode_responses=True)
+            has_changes = False
+            cache_key = f"product:{product_id}"
+            cached_product = await r.hgetall(cache_key)
+            if cached_product: # {product_name:value, price: value, amount: value}
+                for key, value in update_data.items():
+                    if key in cached_product:
+                        cached_value = cached_product[key]
+                        try:
+                            if value is not None:
+                                target_type = type(value)
+                                cached_value = target_type(cached_value)
+                        except (ValueError, TypeError):
+                            pass
+                        
+                        if cached_value != value:
+                            has_changes = True
+                            break
+            else:
+                has_changes = True
+
+            if not has_changes:
+                return True
+            
+            async with async_session() as session:
+                stmt = select(Products).where(Products.product_id == product_id)
+                db_result = await session.execute(stmt)
+                product = db_result.scalar_one_or_none()
+
+                if product:
+                    for key, value in update_data.items():
+                        if hasattr(product, key):
+                            setattr(product, key, value)
+                    await session.commit()
+                    await session.refresh(product) 
+                    print('[LOGS]: Fields of product updated!')
+
+                    updated_product_dict = {
+                        "product_name":str(product.product_name),
+                        "price":str(product.price),
+                        "amount":str(product.amount)
+                    }
+
+                    await r.hset(cache_key, mapping=updated_product_dict)
+                    await r.expire(cache_key, 3600)
+                    return product
+                return None
+        except Exception as e:
+            print(f"Произошла ошибка {e}")
+        finally:
+            if r:
+                await r.close()
 
     @staticmethod
     async def delete_product(product_id: int):
+        r = None       
         async with async_session() as session:
             stmt = delete(Products).where(Products.product_id==product_id)
             await session.execute(stmt)
             await session.commit()
             print('[LOGS]: Product deleted!')
+        try:
+            r = redis.Redis(host='localhost',port=6379, decode_responses=True)
+            cache_key = f"product:{product_id}"
+            cached_product = await r.hgetall(cache_key)
+            if cached_product:
+                await r.delete(cache_key)
+        except Exception as e:
+            print(f"Произошла ошибка {e}")
+        finally:
+            if r:
+                await r.close()
 
 class OrderData():
     @staticmethod
